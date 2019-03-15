@@ -45,9 +45,9 @@
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
-UART_HandleTypeDef huart3;
-DMA_HandleTypeDef hdma_usart3_tx;
-DMA_HandleTypeDef hdma_usart3_rx;
+UART_HandleTypeDef huart2;
+DMA_HandleTypeDef hdma_usart2_rx;
+DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
@@ -58,7 +58,7 @@ DMA_HandleTypeDef hdma_usart3_rx;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
-static void MX_USART3_UART_Init(void);
+static void MX_USART2_UART_Init(void);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -66,9 +66,9 @@ static void MX_USART3_UART_Init(void);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
-uint16_t  data[4];
+uint16_t  data[3];
 uint16_t command=0x04EB;
-uint8_t   rxBuffer,startStream=0;
+uint8_t   rxBuffer,sync_code=0x00;
 /*
  * readCommand Function
  * Parameters: 	config ----> CONFIG COMMAND TO SEND
@@ -92,7 +92,6 @@ void readCommand(uint16_t config,uint8_t discardData)
 		data[0]=0x0000;
 		data[1]=0x0000;
 		data[2]=0x0000;
-		data[3]=0x0000;
 	}
 	DWT_Delay_us(1);
 	while(counter>=0)
@@ -108,24 +107,24 @@ void readCommand(uint16_t config,uint8_t discardData)
 		{
 			read=HAL_GPIO_ReadPin(DIN_X_GPIO_Port,DIN_X_Pin)==GPIO_PIN_SET?0x01:0x00;
 			read=read<<counter;
-			data[1]=data[1]|read;
+			data[0]=data[0]|read;
 			read=HAL_GPIO_ReadPin(DIN_Y_GPIO_Port,DIN_Y_Pin)==GPIO_PIN_SET?0x01:0x00;
 			read=read<<counter;
-			data[2]=data[2]|read;
+			data[1]=data[1]|read;
 			read=HAL_GPIO_ReadPin(DIN_Z_GPIO_Port,DIN_Z_Pin)==GPIO_PIN_SET?0x01:0x00;
 			read=read<<counter--;
-			data[3]=data[3]|read;
+			data[2]=data[2]|read;
 		}else{
 			DWT_Delay_us(2);
 			counter--;
 		}
 	}
+	if(data[0]>=0)
+		data[0]++;
 	if(data[1]>=0)
 		data[1]++;
 	if(data[2]>=0)
 		data[2]++;
-	if(data[3]>=0)
-		data[3]++;
 	//HAL_GPIO_WritePin(CS_GPIO_Port,CS_Pin,GPIO_PIN_SET);
 	return;
 }
@@ -136,12 +135,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	 * All receive byte are received in this function
 	 * Read Byte will determine the active action of STM32 below
 	 */
-  if(rxBuffer=='P'){
-	  HAL_UART_Transmit(&huart3,"Pong",4,1);
-  }else if(rxBuffer=='D'){
-	  startStream=startStream==0?1:0;
-	  command=0x04EB;
-  }else if(rxBuffer=='0'){
+  if(rxBuffer=='0'){
 	  command=0x00EB;
   }else if(rxBuffer=='1'){
 	  command=0x02EB;
@@ -154,7 +148,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   }else if(rxBuffer=='5'){
 	  command=0x0AEB;
   }
-  HAL_UART_Receive_DMA(&huart3, &rxBuffer, 1);
+  HAL_UART_Receive_DMA(&huart2, &rxBuffer, 1);
 }
 /* USER CODE END 0 */
 
@@ -188,7 +182,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_USART3_UART_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   //Initialize Pins
   HAL_GPIO_WritePin(READY_GPIO_Port,READY_Pin,GPIO_PIN_SET);
@@ -196,6 +190,7 @@ int main(void)
   HAL_GPIO_WritePin(SCLK_GPIO_Port,SCLK_Pin,GPIO_PIN_RESET);
   HAL_GPIO_WritePin(DOUT_GPIO_Port,DOUT_Pin,GPIO_PIN_RESET);
   DWT_Delay_Init();
+  HAL_UART_Transmit(&huart2,"AT",2,1);
   HAL_Delay(1000);
   HAL_GPIO_WritePin(CS_GPIO_Port,CS_Pin,GPIO_PIN_RESET);
 
@@ -220,7 +215,7 @@ int main(void)
    * and Callback HAL_UART_RxCpltCallback is called everytime
    * a Byte is received
    */
-  HAL_UART_Receive_DMA(&huart3,&rxBuffer,1);
+  HAL_UART_Receive_DMA(&huart2,&rxBuffer,1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -239,15 +234,12 @@ int main(void)
 			  {
 				  readCommand(command,0);//Send Command and Read The 16 bit Data
 				  readCommand(command,1);//Send Command and Discard the return Data
-	  	  		  if(startStream==1){
-	  	  			  /*
-	  	  			   * Sends The data through bluetooth
-	  	  			   * Please refer to HAL_UART_RxCpltCallback method
-	  	  			   * above to check how does android and stm32
-	  	  			   * communicates
-	  	  			   */
-	  	  			  HAL_UART_Transmit(&huart3,data,8,1);
-				  }
+				  /*
+				   * Sends The data through bluetooth
+				   * Sync_Code variable for synchronizing data with Android
+				   */
+				  HAL_UART_Transmit(&huart2,&sync_code,1,1);
+				  HAL_UART_Transmit(&huart2,data,6,1s);
 			  }
 		  }
 	  }
@@ -311,19 +303,19 @@ void SystemClock_Config(void)
   HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
 }
 
-/* USART3 init function */
-static void MX_USART3_UART_Init(void)
+/* USART2 init function */
+static void MX_USART2_UART_Init(void)
 {
 
-  huart3.Instance = USART3;
-  huart3.Init.BaudRate = 1382400;
-  huart3.Init.WordLength = UART_WORDLENGTH_8B;
-  huart3.Init.StopBits = UART_STOPBITS_1;
-  huart3.Init.Parity = UART_PARITY_NONE;
-  huart3.Init.Mode = UART_MODE_TX_RX;
-  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart3) != HAL_OK)
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 1382400;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
@@ -339,12 +331,12 @@ static void MX_DMA_Init(void)
   __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
-  /* DMA1_Channel2_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
-  /* DMA1_Channel3_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
+  /* DMA1_Channel6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel6_IRQn);
+  /* DMA1_Channel7_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel7_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel7_IRQn);
 
 }
 
@@ -363,8 +355,8 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(READY_GPIO_Port, READY_Pin, GPIO_PIN_RESET);
